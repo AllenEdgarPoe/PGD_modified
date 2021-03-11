@@ -20,7 +20,7 @@ def main(args):
     args.epsilon = float(args.epsilon)/255
     args.alpha = float(args.alpha)/255
 
-    args.save_path = os.path.join(args.save_path, args.mode, args.model)
+    args.save_path = os.path.join(args.save_path, args.mode, args.model, args.train_attacker+"_"+args.test_attacker)
     pathlib.Path(args.save_path).mkdir(parents=True, exist_ok=True)
 
     if args.mode == "pgd_train":
