@@ -128,14 +128,14 @@ class PGD_train:
         self.epoch = model_data['epoch'] + 1
         print('Model loaded successfully')
 
-    def _save_checkpoint(self):
+    def _save_checkpoint(self, path):
         self.model.eval()
         model_data = dict()
         model_data['model'] = self.model.state_dict()
         model_data['optimizer'] = self.optimizer.state_dict()
         model_data['lr_scheduler'] = self.lr_scheduler.state_dict()
         model_data['epoch'] = self.epoch
-        torch.save(model_data, osp.join(self.save_path, 'checkpoint.pth'))
+        torch.save(model_data, osp.join(self.save_path, path))
 
     def train(self):
         adv_losses = AverageMeter()
@@ -186,7 +186,7 @@ class PGD_train:
             adv_acc = float(adv_correct)/total
             mess = "{}th Epoch, nat Acc: {:.3f}, adv Acc: {:.3f}, Loss: {:.3f}".format(self.epoch, nat_acc, adv_acc, loss.item())
             self._log(mess)
-            # self._save_checkpoint()
+            self._save_checkpoint('checkpoint.pth')
 
             # Evaluation
             nat_acc = self.eval_nat()
@@ -196,7 +196,7 @@ class PGD_train:
 
             if nat_acc + adv_acc > best:
                 best = nat_acc + adv_acc
-                self._save_checkpoint()
+                self._save_checkpoint('best_checkpoint.pth')
 
     def eval_nat(self):
         self.model.eval()
