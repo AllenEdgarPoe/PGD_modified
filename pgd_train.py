@@ -107,9 +107,11 @@ class PGD_train:
             self.test_attacker = PGD_attack_modified(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
 
         # resume from checkpoint
-        checkpoint_path = osp.join(args.save_path, 'checkpoint.pth')
+        # checkpoint_path = osp.join(args.save_path, 'checkpoint.pth')
         # if osp.exists(checkpoint_path):
         #     self._load_from_checkpoint(checkpoint_path)
+        # checkpoint_path = osp.join('./results/pgd_train/resnet110/PGD_mod_PGD_mod/checkpoint.pth')
+        # self._load_from_checkpoint(checkpoint_path)
 
     def _log(self, message):
         print(message)
@@ -138,6 +140,8 @@ class PGD_train:
     def train(self):
         adv_losses = AverageMeter()
         nat_losses = AverageMeter()
+
+        best = 0
 
         while self.epoch < self.args.epochs:
             self.model.train()
@@ -182,13 +186,17 @@ class PGD_train:
             adv_acc = float(adv_correct)/total
             mess = "{}th Epoch, nat Acc: {:.3f}, adv Acc: {:.3f}, Loss: {:.3f}".format(self.epoch, nat_acc, adv_acc, loss.item())
             self._log(mess)
-            self._save_checkpoint()
+            # self._save_checkpoint()
 
-            #Evaluation
+            # Evaluation
             nat_acc = self.eval_nat()
             adv_acc = self.eval_adv()
             self._log('Natural Accuracy: {:.3f}'.format(nat_acc))
             self._log('Adv Accuracy: {:.3f}'.format(adv_acc))
+
+            if nat_acc + adv_acc > best:
+                best = nat_acc + adv_acc
+                self._save_checkpoint()
 
     def eval_nat(self):
         self.model.eval()

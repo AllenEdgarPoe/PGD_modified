@@ -20,11 +20,17 @@ def main(args):
     args.epsilon = float(args.epsilon)/255
     args.alpha = float(args.alpha)/255
 
-    args.save_path = os.path.join(args.save_path, args.mode, args.model, args.train_attacker+"_"+args.test_attacker)
+    args.save_path = os.path.join(args.save_path, args.mode, args.model, args.dataset, args.train_attacker+"_"+args.test_attacker)
     pathlib.Path(args.save_path).mkdir(parents=True, exist_ok=True)
 
     if args.mode == "pgd_train":
-        PGD_train(args).train()
+        m = PGD_train(args)
+        m.train()
+        #Evaluation
+        #nat_acc = m.eval_nat()
+        #adv_acc = m.eval_adv()
+        #m._log('Natural Accuracy: {:.3f}'.format(nat_acc))
+        #m._log('Adv Accuracy: {:.3f}'.format(adv_acc))
 
 
 
