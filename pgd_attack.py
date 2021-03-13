@@ -1,33 +1,9 @@
 import torch
 import torch.nn as nn
-
 from attack import Attack
 
 
 class PGD_attack(Attack):
-    r"""
-    PGD in the paper 'Towards Deep Learning Models Resistant to Adversarial Attacks'
-    [https://arxiv.org/abs/1706.06083]
-
-    Distance Measure : Linf
-
-    Arguments:
-        model (nn.Module): model to attack.
-        eps (float): maximum perturbation. (DEFALUT: 0.3)
-        alpha (float): step size. (DEFALUT: 2/255)
-        steps (int): number of steps. (DEFALUT: 40)
-        random_start (bool): using random initialization of delta. (DEFAULT: False)
-
-    Shape:
-        - images: :math:`(N, C, H, W)` where `N = number of batches`, `C = number of channels`,        `H = height` and `W = width`. It must have a range [0, 1].
-        - labels: :math:`(N)` where each value :math:`y_i` is :math:`0 \leq y_i \leq` `number of labels`.
-        - output: :math:`(N, C, H, W)`.
-
-    Examples::
-        >>> attack = torchattacks.PGD(model, eps=8/255, alpha=1/255, steps=40, random_start=False)
-        >>> adv_images = attack(images, labels)
-
-    """
     def __init__(self, model, eps, alpha, steps, random_start=True):
         super(PGD_attack, self).__init__("PGD", model)
         self.eps = eps
@@ -36,9 +12,6 @@ class PGD_attack(Attack):
         self.random_start = random_start
 
     def forward(self, images, labels):
-        r"""
-        Overridden.
-        """
         images = images.clone().detach().to(self.device)
         labels = labels.clone().detach().to(self.device)
         labels = self._transform_label(images, labels)
@@ -69,29 +42,6 @@ class PGD_attack(Attack):
 
 
 class PGD_attack_modified(Attack):
-    r"""
-    PGD in the paper 'Towards Deep Learning Models Resistant to Adversarial Attacks'
-    [https://arxiv.org/abs/1706.06083]
-
-    Distance Measure : Linf
-
-    Arguments:
-        model (nn.Module): model to attack.
-        eps (float): maximum perturbation. (DEFALUT: 0.3)
-        alpha (float): step size. (DEFALUT: 2/255)
-        steps (int): number of steps. (DEFALUT: 40)
-        random_start (bool): using random initialization of delta. (DEFAULT: False)
-
-    Shape:
-        - images: :math:`(N, C, H, W)` where `N = number of batches`, `C = number of channels`,        `H = height` and `W = width`. It must have a range [0, 1].
-        - labels: :math:`(N)` where each value :math:`y_i` is :math:`0 \leq y_i \leq` `number of labels`.
-        - output: :math:`(N, C, H, W)`.
-
-    Examples::
-        >>> attack = torchattacks.PGD(model, eps=8/255, alpha=1/255, steps=40, random_start=False)
-        >>> adv_images = attack(images, labels)
-
-    """
 
     def __init__(self, model, eps=0.3, alpha=2 / 255, steps=40, random_start=False):
         super(PGD_attack_modified, self).__init__("PGD", model)

@@ -2,9 +2,10 @@
   "dataset":  "cifar10",
   "data_path": "./data",
   "model": "resnet110",
+  "model_load": "",
 
   "lr": 0.1,
-  "batch_size": 256,
+  "batch_size": 512,
   "weight_decay": 0.0005,
   "epochs": 200,
   "save_path": "./results",
@@ -16,5 +17,6 @@
 
   "train_attacker": "PGD",
   "test_attacker": "PGD",
-  "mode": "pgd_train"
+  "mode": "pgd_train",
+  "test_data_fixed": true
 }
