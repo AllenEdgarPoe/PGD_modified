@@ -41,10 +41,33 @@ class PGD_attack(Attack):
         return adv_images
 
 
-class PGD_attack_modified(Attack):
+class GD(Attack):
+    r"""
+    PGD in the paper 'Towards Deep Learning Models Resistant to Adversarial Attacks'
+    [https://arxiv.org/abs/1706.06083]
+
+    Distance Measure : Linf
+
+    Arguments:
+        model (nn.Module): model to attack.
+        eps (float): maximum perturbation. (DEFALUT: 0.3)
+        alpha (float): step size. (DEFALUT: 2/255)
+        steps (int): number of steps. (DEFALUT: 40)
+        random_start (bool): using random initialization of delta. (DEFAULT: False)
+
+    Shape:
+        - images: :math:`(N, C, H, W)` where `N = number of batches`, `C = number of channels`,        `H = height` and `W = width`. It must have a range [0, 1].
+        - labels: :math:`(N)` where each value :math:`y_i` is :math:`0 \leq y_i \leq` `number of labels`.
+        - output: :math:`(N, C, H, W)`.
+
+    Examples::
+        >>> attack = torchattacks.PGD(model, eps=8/255, alpha=1/255, steps=40, random_start=False)
+        >>> adv_images = attack(images, labels)
+
+    """
 
     def __init__(self, model, eps=0.3, alpha=2 / 255, steps=40, random_start=False):
-        super(PGD_attack_modified, self).__init__("PGD", model)
+        super(GD, self).__init__("GD", model)
         self.eps = eps
         self.alpha = alpha
         self.steps = steps
@@ -76,10 +99,14 @@ class PGD_attack_modified(Attack):
             grad = torch.autograd.grad(cost, adv_images,
                                        retain_graph=False, create_graph=False)[0]
 
+            # adv_images = adv_images.detach() - self.alpha * grad.sign()
+            # delta = torch.clamp(adv_images - images, min=-self.eps, max=self.eps)
+            # adv_images = torch.clamp(images + delta, min=0, max=1).detach()
             dir = grad * grad.sign()
             adv_images = adv_images.detach() - self.alpha * grad
-            delta = (adv_images - images) * self.eps / (torch.max(dir.view(dir.size(0), -1), dim=1)[0]).view(
-                dir.size(0), 1, 1, 1)
-            adv_images = torch.clamp(images + delta, min=0, max=1).detach()
+            delta = (adv_images - images) * self.eps / (torch.max(dir.view(dir.size(0), -1), dim=1)[0]).view(dir.size(0), 1, 1, 1)
+            # adv_images = adv_images.detach() - self.alpha * grad.sign() * dir * self.eps / (torch.max(dir.view(dir.size(0), -1), dim=1)[0]).view(dir.size(0), 1, 1, 1)
+            # delta = torch.clamp(adv_images - images, min=-self.eps, max=self.eps)
+            adv_images = torch.clamp(images+delta, min=0, max=1).detach()
 
         return adv_images

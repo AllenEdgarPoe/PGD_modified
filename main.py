@@ -32,7 +32,8 @@ def main(args):
         args.save_path = os.path.join(args.save_path, args.mode, args.model, args.dataset, args.test_attacker)
         pathlib.Path(args.save_path).mkdir(parents=True, exist_ok=True)
         m = PGD(args)
-        m.eval_adv()
+        m.test()
+
 
 
 
