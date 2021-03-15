@@ -1,0 +1,24 @@
+{
+  "lr": 0.1,
+  "batch_size": 256,
+  "weight_decay": 0.0005,
+  "epochs": 200,
+
+  "attack_steps": 16,
+  "epsilon": 8,
+  "alpha": 4,
+  "random_start": true,
+
+  "train_attacker": "PGD",
+
+  "dataset":  "cifar10",
+  "data_path": "./data",
+  "model": "resnet110",
+  "model_load": "./results/pgd_train/resnet110/cifar10/PGD_PGD/best_checkpoint.pth",
+
+  "save_path": "./results",
+
+  "test_attacker": "PGD_mod",
+  "mode": "pgd_eval",
+  "test_data_fixed": false
+}
