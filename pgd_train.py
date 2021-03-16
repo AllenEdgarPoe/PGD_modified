@@ -2,6 +2,7 @@ from models.resnet_cifar import *
 from models.wide_resnet_cifar import *
 from pgd_attack import *
 from utils import *
+import copy
 import torch
 import torchvision
 import torchvision.transforms as transforms
@@ -43,21 +44,21 @@ class PGD:
 
 
         #load model
-        norm_layer = Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.247, 0.243, 0.261]) #normalize for cifar10
+        self.norm_layer = Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.247, 0.243, 0.261]) #normalize for cifar10
         if args.model == "resnet110":
             if args.dataset == "cifar100":
-                self.model = nn.Sequential(norm_layer, resnet110_cifar(num_classes=100))
+                self.model = nn.Sequential(self.norm_layer, resnet110_cifar(num_classes=100))
             elif args.dataset == "cifar10":
                 # self.model = resnet110_cifar(num_classes=10)
-                self.model = nn.Sequential(norm_layer, resnet110_cifar(num_classes=10))
+                self.model = nn.Sequential(self.norm_layer, resnet110_cifar(num_classes=10))
             else:
                 print("Dataset needs to be fixed")
                 assert False
         elif args.model == "WRN":
             if args.dataset == "cifar100":
-                self.model = nn.Sequential(norm_layer, WideResNet(depth=28, widen_factor=2, num_classes=10))
+                self.model = nn.Sequential(self.norm_layer, WideResNet(depth=28, widen_factor=2, num_classes=10))
             elif args.dataset == "cifar10":
-                self.model = nn.Sequential(norm_layer, WideResNet(depth=28, widen_factor=2, num_classes=10))
+                self.model = nn.Sequential(self.norm_layer, WideResNet(depth=28, widen_factor=2, num_classes=10))
             else:
                 print("Dataset needs to be fixed")
                 assert False
@@ -73,15 +74,8 @@ class PGD:
         self.epoch = 0
 
         self.save_path = args.save_path
-        if args.train_attacker == "PGD":
-            self.train_attacker = PGD_attack(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
-        elif args.train_attacker == "PGD_mod":
-            self.train_attacker = GD(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
 
-        if args.test_attacker == "PGD":
-            self.test_attacker = PGD_attack(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
-        elif args.test_attacker == "PGD_mod":
-            self.test_attacker = GD(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
+
 
         # resume from checkpoint
         # checkpoint_path = osp.join(args.save_path, 'checkpoint.pth')
@@ -132,6 +126,10 @@ class PGD:
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = 0.001
 
+        if self.args.train_attacker == "PGD":
+            self.train_attacker = PGD_attack(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
+        elif self.args.train_attacker == "PGD_mod":
+            self.train_attacker = GD(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
 
         while self.epoch < self.args.epochs:
             self.model.train()
@@ -180,10 +178,9 @@ class PGD:
             self._save_checkpoint('checkpoint.pth')
 
             # Evaluation
-            nat_acc, adv_acc = self.eval()
+            nat_acc, adv_acc = self.eval_()
 
-            self._log('Natural Accuracy: {:.3f}'.format(nat_acc))
-            self._log('Adv Accuracy: {:.3f}'.format(adv_acc))
+
 
             if nat_acc + adv_acc > best_adv_acc + best_nat_acc:
                 best_adv_acc = adv_acc
@@ -193,17 +190,23 @@ class PGD:
         self._log('=======Best Test Accuracy: {:.3f}/{:.3f}======'.format(best_adv_acc, best_nat_acc))
 
 
-    def eval(self):
+    def eval_(self):
         self.model.eval()
         adv_correct = 0
         nat_correct = 0
         total = 0
+
+        if self.args.test_attacker == "PGD":
+            self.test_attacker = PGD_attack(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
+        elif self.args.test_attacker == "PGD_mod":
+            self.test_attacker = GD(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
 
         for i, (image, label) in enumerate(self.testloader):
             if torch.cuda.is_available():
                 image = image.cuda()
                 label = label.cuda()
             image, label = Variable(image), Variable(label)
+
             adv_image = self.test_attacker(image, label)
 
             nat_logits = self.model(image)
@@ -218,29 +221,111 @@ class PGD:
 
         nat_acc = float(nat_correct) / total
         adv_acc = float(adv_correct) / total
+
+        self._log('Natural Accuracy: {:.3f}'.format(nat_acc))
+        self._log('Adv Accuracy: {:.3f}'.format(adv_acc))
         return nat_acc, adv_acc
 
 
+    def test(self):
+        norm_layer = Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.247, 0.243, 0.261])
+        net1 = nn.Sequential(norm_layer, WideResNet(depth=28, widen_factor=2, num_classes=10))
+        net1 = net1.cuda()
+        checkpoint_path1 = osp.join(self.args.model_load1)
+        model_data1 = torch.load(checkpoint_path1)
+        net1.load_state_dict(model_data1['model'])
+
+        net2 = nn.Sequential(self.norm_layer, WideResNet(depth=28, widen_factor=2, num_classes=10))
+        net2 = net2.cuda()
+        checkpoint_path2 = osp.join(self.args.model_load2)
+        model_data2 = torch.load(checkpoint_path2)
+        net2.load_state_dict(model_data2['model'])
+
+        print("safely loaded models")
+        net1.eval()
+        net2.eval()
+
+        correct1 = 0
+        correct2 = 0
+        correct3 = 0
+        correct4 = 0
+        correct5 = 0
+        correct6 = 0
+        correct7 = 0
+        correct8 = 0
+        correct13 = 0
+        correct14 = 0
+
+        total = 0
+
+        for batch_idx, (inputs, targets) in enumerate(self.testloader):
+            inputs, targets = inputs.cuda(), targets.cuda()
+            inputs, targets = Variable(inputs), Variable(targets)
+
+            #Clean image
+            output1 = net1(inputs)
+            output2 = net2(inputs)
+
+            # net1: PGD trained, net2: GD trained
+            atk_pgd1 = PGD_attack(net1, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)  #noise
+            atk_pgd2 = PGD_attack(net2, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
+            atk_gd1 = GD(net1, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
+            atk_gd2 = GD(net2, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
+
+            adversarial_images_pgd1 = atk_pgd1(inputs, targets)
+            adversarial_images_gd1 = atk_gd1(inputs, targets)
+            adversarial_images_pgd2 = atk_pgd2(inputs, targets)
+            adversarial_images_gd2 = atk_gd2(inputs, targets)
+            net1_output_pgd1, net2_output_pgd1 = net1(adversarial_images_pgd1), net2(adversarial_images_pgd1)
+            net1_output_gd1, net2_output_gd1 = net1(adversarial_images_gd1), net2(adversarial_images_gd1)
+            net1_output_pgd2, net2_output_pgd2 = net1(adversarial_images_pgd2), net2(adversarial_images_pgd2)
+            net1_output_gd2, net2_output_gd2 = net1(adversarial_images_gd2), net2(adversarial_images_gd2)
+
+            _, predicted1 = torch.max(net1_output_pgd1.data, 1)
+            _, predicted2 = torch.max(net2_output_pgd1.data, 1)
+            _, predicted3 = torch.max(net1_output_gd1.data, 1)
+            _, predicted4 = torch.max(net2_output_gd1.data, 1)
+
+            _, predicted5 = torch.max(net1_output_pgd2.data, 1)
+            _, predicted6 = torch.max(net2_output_pgd2.data, 1)
+            _, predicted7 = torch.max(net1_output_gd2.data, 1)
+            _, predicted8 = torch.max(net2_output_gd2.data, 1)
+
+            _, predicted_clean1 = torch.max(output1.data, 1)
+            _, predicted_clean2 = torch.max(output2.data, 1)
+
+            # _, predicted = torch.max(student_outputs[1].data, 1)
+            total += targets.size(0)
+            correct1 += predicted1.eq(targets.data).cpu().sum()
+            correct2 += predicted2.eq(targets.data).cpu().sum()
+            correct3 += predicted3.eq(targets.data).cpu().sum()
+            correct4 += predicted4.eq(targets.data).cpu().sum()
+            correct5 += predicted5.eq(targets.data).cpu().sum()
+            correct6 += predicted6.eq(targets.data).cpu().sum()
+            correct7 += predicted7.eq(targets.data).cpu().sum()
+            correct8 += predicted8.eq(targets.data).cpu().sum()
+            correct13 += predicted_clean1.eq(targets.data).cpu().sum()
+            correct14 += predicted_clean2.eq(targets.data).cpu().sum()
+
+        print('Clean Accuracy Net1: %.2f' % (float(correct13) / float(total) * 100))
+        print('Clean Accuracy Net2: %.2f\n' % (float(correct14) / float(total) * 100))
+        print('Noise From Net1 with PGD: Net1: %.2f Net2: %.2f' % (
+        float(correct1) / float(total) * 100, float(correct2) / float(total) * 100))
+        print('Noise From Net1 with  GD: Net1: %.2f Net2: %.2f\n' % (
+        float(correct3) / float(total) * 100, float(correct4) / float(total) * 100))
+        print('Noise From Net2 with PGD: Net1: %.2f Net2: %.2f' % (
+        float(correct5) / float(total) * 100, float(correct6) / float(total) * 100))
+        print('Noise From Net2 with  GD: Net1: %.2f Net2: %.2f\n' % (
+        float(correct7) / float(total) * 100, float(correct8) / float(total) * 100))
 
 
 
+# Clean Accuracy Net1: 74.88
+# Clean Accuracy Net2: 69.34
 #
-# class FixedTestloader(torch.utils.data.Dataset):
-#   def __init__(self, testloader, test_attacker):
-#       self.x_data = []
-#       self.y_data = []
-#       for i, (image, label) in enumerate(testloader):
-#           x_adv = test_attacker.forward(image, label)
-#           self.x_data.append(x_adv)
-#           self.y_data.append(label)
+# Noise From Net1 with PGD: Net1: 29.09 Net2: 53.73
+# Noise From Net1 with  GD: Net1: 19.40 Net2: 33.26
 #
-#   def __len__(self):
-#     return len(self.x_data)
-#
-#   def __getitem__(self, idx):
-#     x = self.x_data[idx]
-#     y = self.y_data[idx]
-#     return x, y
-
-
+# Noise From Net2 with PGD: Net1: 60.78 Net2: 24.74
+# Noise From Net2 with  GD: Net1: 19.34 Net2: 33.32
 

@@ -14,11 +14,13 @@
   "dataset":  "cifar10",
   "data_path": "./data",
   "model": "WRN",
-  "model_load": "./results/pgd_train/WRN/cifar10/PGD_mod_PGD_mod/best_checkpoint.pth",
+  "model_load": "./results/pgd_train/WRN/cifar10/PGD_PGD/best_checkpoint.pth",
+  "model_load1": "./results/pgd_train/WRN/cifar10/PGD_PGD/best_checkpoint.pth",
+  "model_load2": "./results/pgd_train/WRN/cifar10/PGD_mod_PGD_mod/best_checkpoint.pth",
 
   "save_path": "./results",
 
   "test_attacker": "PGD",
-  "mode": "pgd_eval",
+  "mode": "pgd_test",
   "test_data_fixed": false
 }
