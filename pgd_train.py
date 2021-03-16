@@ -126,13 +126,15 @@ class PGD:
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = 0.001
 
-        if self.args.train_attacker == "PGD":
-            self.train_attacker = PGD_attack(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
-        elif self.args.train_attacker == "PGD_mod":
-            self.train_attacker = GD(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
-
         while self.epoch < self.args.epochs:
             self.model.train()
+            if self.args.train_attacker == "PGD":
+                self.train_attacker = PGD_attack(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps,
+                                                 random_start=self.args.random_start)
+            elif self.args.train_attacker == "PGD_mod":
+                self.train_attacker = GD(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps,
+                                         random_start=self.args.random_start)
+
             total = 0
             adv_correct = 0
             nat_correct = 0
