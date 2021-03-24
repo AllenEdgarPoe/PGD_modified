@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import torchattacks
 
-class PGD:
+class adv_KD:
     def __init__(self, args):
         self.args = args
 
@@ -66,24 +66,36 @@ class PGD:
 
         self.model = torch.nn.DataParallel(self.model).cuda()
         # self.model = self.model.cuda()
-        torch.backends.cudnn.deterministic = True
-        cudnn.benchmark = True
 
         self.optimizer = optim.SGD(self.model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
         self.criterion = nn.CrossEntropyLoss().cuda()
         self.epoch = 0
-
         self.save_path = args.save_path
 
+        #load teacher models
+        self.T_net1 = nn.Sequential(self.norm_layer, WideResNet(depth=28, widen_factor=2, num_classes=10))
+        self.T_net1 = torch.nn.DataParallel(self.T_net1).cuda()
+        self.T_net1 = self._load_from_checkpoint(args.t1_checkpoint_path, self.T_net1)
+        self.T_net2 = nn.Sequential(self.norm_layer, WideResNet(depth=28, widen_factor=2, num_classes=10))
+        self.T_net2 = torch.nn.DataParallel(self.T_net2).cuda()
+        self.T_net2 = self._load_from_checkpoint(args.t2_checkpoint_path, self.T_net2)
+
+        torch.backends.cudnn.deterministic = True
+        cudnn.benchmark = True
+
+        self.T_net1.eval()
+        self.T_net2.eval()
 
 
-        # resume from checkpoint
-        # checkpoint_path = osp.join(args.save_path, 'checkpoint.pth')
-        # if osp.exists(checkpoint_path):
-        #     self._load_from_checkpoint(checkpoint_path)
-        if not args.model_load == None:
-            checkpoint_path = osp.join(args.model_load)
-            self._load_from_checkpoint(checkpoint_path)
+
+    def distillation(self, y, teacher_scores, labels, T, alpha):
+        soft_target = F.softmax(teacher_scores / T, dim=1)
+        hard_target = labels
+        logp = F.log_softmax(y / T, dim=1)
+        loss_soft_target = -torch.mean(torch.sum(soft_target * logp, dim=1))
+        loss_hard_target = nn.CrossEntropyLoss()(y, hard_target)
+        loss = loss_soft_target * T * T + alpha * loss_hard_target
+        return loss
 
     def _log(self, message):
         print(message)
@@ -91,13 +103,12 @@ class PGD:
         f.write(message + '\n')
         f.close()
 
-    def _load_from_checkpoint(self, checkpoint_path):
+    def _load_from_checkpoint(self, checkpoint_path, model):
         print('Loading model from {} ...'.format(checkpoint_path))
         model_data = torch.load(checkpoint_path)
-        self.model.load_state_dict(model_data['model'])
-        self.optimizer.load_state_dict(model_data['optimizer'])
-        self.epoch = model_data['epoch'] + 1
+        model.load_state_dict(model_data['model'])
         print('Model loaded successfully')
+        return model
 
     def _save_checkpoint(self, path):
         self.model.eval()
@@ -108,10 +119,8 @@ class PGD:
         torch.save(model_data, osp.join(self.save_path, path))
 
     def train(self):
-        adv_losses = AverageMeter()
-        nat_losses = AverageMeter()
-
-        best_adv_acc = 0
+        best_acc_1 = 0
+        best_acc_2 = 0
         best_nat_acc = 0
 
         if self.epoch < 80:
@@ -129,118 +138,105 @@ class PGD:
 
         while self.epoch < self.args.epochs:
             self.model.train()
-            if self.args.train_attacker == "PGD":
-                self.train_attacker = PGD_attack(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps,
-                                                 random_start=self.args.random_start)
-            elif self.args.train_attacker == "PGD_mod":
-                self.train_attacker = GD(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps,
-                                         random_start=self.args.random_start)
-
-            elif self.args.train_attacker == "PGDL2":
-                self.train_attacker = torchattacks.FAB(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps,
-                                         random_start=self.args.random_start)
-
-            elif self.args.train_attacker == "CW":
-                self.train_attacker = torchattacks.CW(self.model)
-
             total = 0
-            adv_correct = 0
+            adv_correct_1 = 0
+            adv_correct_2 = 0
             nat_correct = 0
 
             for i, (image,label) in enumerate(self.trainloader):
+
                 if torch.cuda.is_available():
                     image = image.cuda()
                     label = label.cuda()
 
                 self.optimizer.zero_grad()
                 image, label = Variable(image), Variable(label)
-                x_adv = self.train_attacker(image, label)
 
-                #compute output
-                adv_logits = self.model(x_adv)
-                nat_logits = self.model(image)
-                adv_loss = self.criterion(adv_logits, label)
-                nat_loss = self.criterion(nat_logits, label)
-                # loss = 0.5*adv_loss+0.5*nat_loss
-                loss = adv_loss
+                #load attack method
+                atk1 = torchattacks.PGD(self.model, eps=8 / 255, alpha=2 / 255, steps=4)
+                atk2 = torchattacks.PGDL2(self.model, eps=0.5, alpha=0.1, steps=7)
+                adversarial_images1 = atk1(image,label)
+                adversarial_images2 = atk2(image,label)
+                outputs1 = self.T_net1(image)
+                outputs2 = self.T_net2(image)
+
+                student_outputs_adv1 = self.model(adversarial_images1)
+                student_outputs_adv2 = self.model(adversarial_images2)
+                student_output = self.model(image)
+
+                loss_adv1 = self.distillation(student_outputs_adv1, outputs1, label, 3, 0.9)  # learn both from pgd AND
+                loss_adv2 = self.distillation(student_outputs_adv2, outputs2, label, 3, 0.9)
+                loss = loss_adv1 + loss_adv2
                 loss.backward()
                 self.optimizer.step()
 
                 #checking for attack-success acc
-                _, adv_pred = torch.max(adv_logits, dim=1)
-                adv_correct += (adv_pred == label).sum()
+                _, adv_pred_1 = torch.max(student_outputs_adv1, dim=1)
+                _, adv_pred_2 = torch.max(student_outputs_adv2, dim=1)
+                _, pred = torch.max(student_output, dim=1)
+                adv_correct_1 += (adv_pred_1 == label).sum()
+                adv_correct_2 += (adv_pred_2 == label).sum()
+                nat_correct += (pred == label).sum()
                 total += label.size(0)
-
-                #checking for natural-success acc
-                _, nat_pred = torch.max(nat_logits, dim=1)
-                nat_correct += (nat_pred == label).sum()
-
-                adv_losses.update(adv_loss.data.item(), x_adv.size(0))
-                nat_losses.update(nat_loss.data.item(), image.size(0))
-
 
             self.epoch += 1
 
-            nat_acc = float(nat_correct)/total
-            adv_acc = float(adv_correct)/total
-            mess = "{}th Epoch, nat Acc: {:.3f}, adv Acc: {:.3f}, Loss: {:.3f}".format(self.epoch, nat_acc, adv_acc, loss.item())
+            acc_1 = float(adv_correct_1)/total
+            acc_2 = float(adv_correct_2)/total
+            nat_acc_ = float(nat_correct)/total
+            mess = "{}th Epoch, nat_acc: {:.3f}, Acc_1: {:.3f}, Acc_2: {:.3f}, Loss: {:.3f}".format(self.epoch, nat_acc_, acc_1, acc_2, loss.item())
             self._log(mess)
             self._save_checkpoint('checkpoint.pth')
 
             # Evaluation
-            nat_acc, adv_acc = self.eval_()
+            nat_acc, adv_acc_1, adv_acc_2 = self.eval_()
 
-
-
-            if nat_acc + adv_acc > best_adv_acc + best_nat_acc:
-                best_adv_acc = adv_acc
+            if nat_acc + adv_acc_1 + adv_acc_2 > best_nat_acc + best_acc_1 + best_acc_2:
                 best_nat_acc = nat_acc
+                best_acc_1 = adv_acc_1
+                best_acc_2 = adv_acc_2
                 self._save_checkpoint('best_checkpoint.pth')
-                self._log('Best Test Accuracy: {:.3f}/{:.3f}'.format(best_adv_acc, best_nat_acc))
-        self._log('=======Best Test Accuracy: {:.3f}/{:.3f}======'.format(best_adv_acc, best_nat_acc))
+                self._log('Best Test Accuracy: {:.3f}/{:.3f}/{:.3f}'.format(best_nat_acc, best_acc_1, best_acc_2))
+        self._log('=======Best Test Accuracy: {:.3f}/{:.3f}/{:.3f}======'.format(best_nat_acc, best_acc_1, best_acc_2))
 
 
     def eval_(self):
         self.model.eval()
-        adv_correct = 0
+        adv_correct_1 = 0
+        adv_correct_2 = 0
         nat_correct = 0
         total = 0
-
-        if self.args.test_attacker == "PGD":
-            self.test_attacker = PGD_attack(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
-        elif self.args.test_attacker == "PGD_mod":
-            self.test_attacker = GD(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
-        elif self.args.train_attacker == "PGDL2":
-            self.test_attacker = torchattacks.PGDL2(self.model, self.args.epsilon, self.args.alpha, self.args.attack_steps,
-                                         random_start=self.args.random_start)
-        elif self.args.train_attacker == "CW":
-            self.test_attacker = torchattacks.CW(self.model)
-
 
         for i, (image, label) in enumerate(self.testloader):
             if torch.cuda.is_available():
                 image = image.cuda()
                 label = label.cuda()
             image, label = Variable(image), Variable(label)
+            atk1 = torchattacks.PGD(self.model, eps=8 / 255, alpha=2 / 255, steps=4)
+            atk2 = torchattacks.PGDL2(self.model, eps=0.5, alpha=0.1, steps=7)
+            adversarial_images1 = atk1(image, label)
+            adversarial_images2 = atk2(image, label)
+            student_outputs = self.model(image)
+            student_outputs_adv1 = self.model(adversarial_images1)
+            student_outputs_adv2 = self.model(adversarial_images2)
 
-            adv_image = self.test_attacker(image, label)
-
-            nat_logits = self.model(image)
-            adv_logits = self.model(adv_image)
-
-            _, nat_pred = torch.max(nat_logits, dim=1)
-            _, adv_pred = torch.max(adv_logits, dim=1)
-
-            nat_correct += (nat_pred == label).sum()
-            adv_correct += (adv_pred == label).sum()
+            # checking for attack-success acc
+            _, predicted = torch.max(student_outputs.data, 1)
+            _, adv_pred_1 = torch.max(student_outputs_adv1, dim=1)
+            _, adv_pred_2 = torch.max(student_outputs_adv2, dim=1)
+            nat_correct += (predicted == label).sum()
+            adv_correct_1 += (adv_pred_1 == label).sum()
+            adv_correct_2 += (adv_pred_2 == label).sum()
             total += label.size(0)
 
         nat_acc = float(nat_correct) / total
-        adv_acc = float(adv_correct) / total
+        adv_acc_1 = float(adv_correct_1) / total
+        adv_acc_2 = float(adv_correct_2) / total
 
         self._log('Natural Accuracy: {:.3f}'.format(nat_acc))
-        self._log('Adv Accuracy: {:.3f}'.format(adv_acc))
-        return nat_acc, adv_acc
+        self._log('Adv Accuracy_1: {:.3f}'.format(adv_acc_1))
+        self._log('Adv Accuracy_2: {:.3f}'.format(adv_acc_2))
+        return nat_acc, adv_acc_1, adv_acc_2
 
 
     def test(self):
@@ -256,8 +252,6 @@ class PGD:
         checkpoint_path2 = osp.join(self.args.model_load2)
         model_data2 = torch.load(checkpoint_path2)
         net2.load_state_dict(model_data2['model'])
-        torch.backends.cudnn.deterministic = True
-        cudnn.benchmark = True
 
         print("safely loaded models")
         net1.eval()
@@ -285,10 +279,10 @@ class PGD:
             output2 = net2(inputs)
 
             # net1: PGD trained, net2: GD trained
-            atk_pgd1 = torchattacks.PGD(net1, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)  #noise
-            atk_pgd2 = torchattacks.PGD(net2, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
-            atk_gd1 = torchattacks.PGDL2(net1, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
-            atk_gd2 = torchattacks.PGDL2(net2, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
+            atk_pgd1 = PGD_attack(net1, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)  #noise
+            atk_pgd2 = PGD_attack(net2, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
+            atk_gd1 = GD(net1, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
+            atk_gd2 = GD(net2, self.args.epsilon, self.args.alpha, self.args.attack_steps, random_start=self.args.random_start)
 
             adversarial_images_pgd1 = atk_pgd1(inputs, targets)
             adversarial_images_gd1 = atk_gd1(inputs, targets)

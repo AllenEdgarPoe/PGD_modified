@@ -1,0 +1,15 @@
+{
+  "dataset":  "cifar10",
+  "data_path": "./data",
+  "model": "WRN",
+
+  "lr": 0.1,
+  "batch_size": 1024,
+  "weight_decay": 0.0005,
+  "epochs": 160,
+  "save_path": "./results/KD/PGD_n_L2/clean",
+
+  "t1_checkpoint_path": "./results/pgd_train/PGD_PGD/best_checkpoint.pth",
+  "t2_checkpoint_path": "./results/pgd_train/PGDL2/best_checkpoint.pth",
+  "mode": "KD"
+}
