@@ -62,6 +62,7 @@ class WideResNet(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.fc = nn.Linear(nChannels[3], num_classes)
         self.nChannels = nChannels[3]
+        self.AdaptiveAvgPool2d = nn.AdaptiveAvgPool2d((1,1))
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -89,7 +90,8 @@ class WideResNet(nn.Module):
         # out = (self.bn1(out))
         out = self.relu(self.bn1(out))
         # attention_map.append(out)
-        out = F.avg_pool2d(out, 8)
+        # out = F.avg_pool2d(out, 8)
+        out = self.AdaptiveAvgPool2d(out)
         out = out.view(-1, self.nChannels)
         out = self.fc(out)
         # attention_map.append(out)
